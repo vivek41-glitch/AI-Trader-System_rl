@@ -1,0 +1,62 @@
+[
+  {
+    "time": "2026-03-25 23:28:03",
+    "stock": "Apple",
+    "action": "BUY",
+    "shares": 3,
+    "price": 251.63999938964844,
+    "cost": 754.9199981689453,
+    "profit": null,
+    "balance_after": 9245.080001831055
+  },
+  {
+    "time": "2026-03-25 23:28:03",
+    "stock": "Tesla",
+    "action": "BUY",
+    "shares": 2,
+    "price": 388.3800048828125,
+    "cost": 776.760009765625,
+    "profit": null,
+    "balance_after": 8468.31999206543
+  },
+  {
+    "time": "2026-03-25 23:28:03",
+    "stock": "Microsoft",
+    "action": "BUY",
+    "shares": 2,
+    "price": 370.8999938964844,
+    "cost": 741.7999877929688,
+    "profit": null,
+    "balance_after": 7726.520004272461
+  },
+  {
+    "time": "2026-03-25 23:28:06",
+    "stock": "Wipro",
+    "action": "BUY",
+    "shares": 4,
+    "price": 189.0500030517578,
+    "cost": 756.2000122070312,
+    "profit": null,
+    "balance_after": 6970.31999206543
+  },
+  {
+    "time": "2026-03-26 09:04:24",
+    "stock": "Google",
+    "action": "BUY",
+    "shares": 2,
+    "price": 290.92999267578125,
+    "cost": 581.8599853515625,
+    "profit": null,
+    "balance_after": 6388.460006713867
+  },
+  {
+    "time": "2026-03-26 09:04:25",
+    "stock": "Amazon",
+    "action": "BUY",
+    "shares": 3,
+    "price": 211.7100067138672,
+    "cost": 635.1300201416016,
+    "profit": null,
+    "balance_after": 5753.329986572266
+  }
+]

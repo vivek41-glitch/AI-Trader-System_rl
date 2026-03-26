@@ -1,0 +1,50 @@
+{
+  "balance": 5753.329986572266,
+  "holdings": {
+    "AAPL": {
+      "shares": 3,
+      "buy_price": 251.63999938964844,
+      "buy_time": "2026-03-25 23:28",
+      "name": "Apple",
+      "cost": 754.9199981689453
+    },
+    "TSLA": {
+      "shares": 2,
+      "buy_price": 388.3800048828125,
+      "buy_time": "2026-03-25 23:28",
+      "name": "Tesla",
+      "cost": 776.760009765625
+    },
+    "MSFT": {
+      "shares": 2,
+      "buy_price": 370.8999938964844,
+      "buy_time": "2026-03-25 23:28",
+      "name": "Microsoft",
+      "cost": 741.7999877929688
+    },
+    "WIPRO_NS": {
+      "shares": 4,
+      "buy_price": 189.0500030517578,
+      "buy_time": "2026-03-25 23:28",
+      "name": "Wipro",
+      "cost": 756.2000122070312
+    },
+    "GOOGL": {
+      "shares": 2,
+      "buy_price": 290.92999267578125,
+      "buy_time": "2026-03-26 09:04",
+      "name": "Google",
+      "cost": 581.8599853515625
+    },
+    "AMZN": {
+      "shares": 3,
+      "buy_price": 211.7100067138672,
+      "buy_time": "2026-03-26 09:04",
+      "name": "Amazon",
+      "cost": 635.1300201416016
+    }
+  },
+  "total_profit": 0,
+  "start_date": "2026-03-25",
+  "last_updated": "2026-03-26 09:04:34"
+}

@@ -1,0 +1,64 @@
+[
+  {
+    "date": "2026-03-26",
+    "cash": 5753.33,
+    "holdings_value": 4245.03,
+    "total_portfolio": 9998.36,
+    "total_return": -0.02,
+    "realized_profit": 0,
+    "unrealized_profit": -1.64,
+    "total_trades": 6,
+    "sell_trades": 0,
+    "win_rate": 0,
+    "holdings": [
+      {
+        "stock": "Apple",
+        "shares": 3,
+        "buy_price": 251.64,
+        "current_price": 252.62,
+        "value": 757.86,
+        "unrealized_profit": 2.94
+      },
+      {
+        "stock": "Tesla",
+        "shares": 2,
+        "buy_price": 388.38,
+        "current_price": 385.95,
+        "value": 771.9,
+        "unrealized_profit": -4.86
+      },
+      {
+        "stock": "Microsoft",
+        "shares": 2,
+        "buy_price": 370.9,
+        "current_price": 371.04,
+        "value": 742.08,
+        "unrealized_profit": 0.28
+      },
+      {
+        "stock": "Wipro",
+        "shares": 4,
+        "buy_price": 189.05,
+        "current_price": 189.05,
+        "value": 756.2,
+        "unrealized_profit": 0.0
+      },
+      {
+        "stock": "Google",
+        "shares": 2,
+        "buy_price": 290.93,
+        "current_price": 290.93,
+        "value": 581.86,
+        "unrealized_profit": 0.0
+      },
+      {
+        "stock": "Amazon",
+        "shares": 3,
+        "buy_price": 211.71,
+        "current_price": 211.71,
+        "value": 635.13,
+        "unrealized_profit": 0.0
+      }
+    ]
+  }
+]
