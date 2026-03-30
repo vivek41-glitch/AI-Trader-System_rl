@@ -17,8 +17,8 @@ import json, os, time
 # 5. Copy API_KEY and SECRET_KEY below
 # ============================================
 
-ALPACA_API_KEY    = "YOUR_ALPACA_API_KEY"
-ALPACA_SECRET_KEY = "YOUR_ALPACA_SECRET_KEY"
+ALPACA_API_KEY    = "PKKNDDLHKYKEZ652IHYDYLEPWG"
+ALPACA_SECRET_KEY = "6U4NZ8WYvkMBoruNjXe3AFDDL32ypp4YEbSnkQqV1KCC"
 ALPACA_BASE_URL   = "https://paper-api.alpaca.markets"   # Paper = free fake money
 # When ready for REAL money, change to: "https://api.alpaca.markets"
 
@@ -204,7 +204,7 @@ def should_stop_loss(position, stop_pct=-0.05):
 
 def run_us_trader(model=None):
     """Main function — run this every day."""
-    from telegram_alerts import alert_buy, alert_sell, alert_daily_summary
+    from telegram_alerts_v2 import alert_buy, alert_sell, alert_daily_summary
 
     print("\n🇺🇸 US STOCK TRADER (ALPACA PAPER)")
     print("=" * 50)
