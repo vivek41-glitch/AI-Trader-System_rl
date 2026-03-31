@@ -1,0 +1,10 @@
+stable-baselines3
+yfinance
+pandas
+numpy
+pandas-ta
+requests
+schedule
+pytz
+torch
+scikit-learn
