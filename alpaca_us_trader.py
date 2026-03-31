@@ -63,7 +63,7 @@ def get_account():
 # ─── Price Data ───────────────────────────────────────────────────────────────
 
 def get_price_data(symbol, days=100):
-    """Fetch historical OHLCV data from Alpaca."""
+    """Fetch historical OHLCV data — Alpaca first, yfinance as fallback."""
     try:
         end   = datetime.now()
         start = end - timedelta(days=days + 50)
@@ -72,15 +72,42 @@ def get_price_data(symbol, days=100):
             "timeframe": "1Day",
             "start":     start.strftime("%Y-%m-%dT%H:%M:%SZ"),
             "end":       end.strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "limit":     200
+            "limit":     200,
+            "feed":      "iex"   # IEX feed works outside market hours
         }
         r = requests.get(url, headers=HEADERS, params=params, timeout=15)
-        if r.status_code != 200:
-            return None
-        
-        bars = r.json().get("bars", [])
+        bars = []
+        if r.status_code == 200:
+            bars = r.json().get("bars", [])
+
+        # Fallback to yfinance if Alpaca returns no data (market closed etc)
         if len(bars) < 50:
-            return None
+            print(f"  ℹ️ Alpaca no data for {symbol} — using yfinance fallback")
+            try:
+                import yfinance as yf
+                df_yf = yf.download(symbol, period="150d", interval="1d",
+                                    auto_adjust=True, progress=False)
+                if len(df_yf) < 50:
+                    return None
+                if isinstance(df_yf.columns, __import__("pandas").MultiIndex):
+                    df_yf.columns = df_yf.columns.get_level_values(0)
+                df_yf = df_yf[["Open","High","Low","Close","Volume"]].astype(float).dropna()
+                df = df_yf.reset_index(drop=True)
+                # Add indicators
+                df["RSI"]         = ta.rsi(df["Close"], length=14)
+                macd              = ta.macd(df["Close"])
+                df["MACD"]        = macd["MACD_12_26_9"]
+                df["MACD_Signal"] = macd["MACDs_12_26_9"]
+                df["EMA_20"]      = ta.ema(df["Close"], length=20)
+                df["EMA_50"]      = ta.ema(df["Close"], length=50)
+                bb                = ta.bbands(df["Close"], length=20)
+                df["BB_Upper"]    = bb[bb.columns[0]]
+                df["BB_Mid"]      = bb[bb.columns[1]]
+                df["BB_Lower"]    = bb[bb.columns[2]]
+                return df.dropna().reset_index(drop=True)
+            except Exception as e:
+                print(f"  ❌ yfinance fallback also failed: {e}")
+                return None
 
         df = pd.DataFrame(bars)
         df = df.rename(columns={"o":"Open","h":"High","l":"Low","c":"Close","v":"Volume"})
@@ -205,7 +232,6 @@ def should_stop_loss(position, stop_pct=-0.05):
 def run_us_trader(model=None):
     """Main function — run this every day."""
     from telegram_alerts_v2 import alert_buy, alert_sell, alert_daily_summary
-
     print("\n🇺🇸 US STOCK TRADER (ALPACA PAPER)")
     print("=" * 50)
     print(f"⏰ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
