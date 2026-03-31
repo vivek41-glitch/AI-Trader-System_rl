@@ -1,4 +1,3 @@
-stable-baselines3
 yfinance
 pandas
 numpy
