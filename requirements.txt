@@ -6,5 +6,4 @@ pandas-ta
 requests
 schedule
 pytz
-torch
 scikit-learn
