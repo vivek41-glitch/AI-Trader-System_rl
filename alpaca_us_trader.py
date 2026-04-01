@@ -3,31 +3,31 @@ import pandas as pd
 import numpy as np
 import pandas_ta as ta
 from datetime import datetime, timedelta
-import json, os, time
+import time
+import json
+import os
 
 # ============================================
-# ALPACA US STOCKS TRADER (100% FREE)
-# Paper trading = fake money, real prices
-# ============================================
-# SETUP (5 minutes, completely free):
-# 1. Go to alpaca.markets
-# 2. Click "Get Started Free" → sign up
-# 3. Go to Dashboard → Paper Trading
-# 4. Click "API Keys" → Generate Key
-# 5. Copy API_KEY and SECRET_KEY below
+# ALPACA US TRADER v2
+# NOW WITH:
+# ✅ Risk Manager connected
+# ✅ Stop Loss (-5%)
+# ✅ Take Profit (+8%)
+# ✅ yfinance fallback when market closed
+# ✅ More stocks (15 instead of 7)
 # ============================================
 
-ALPACA_API_KEY    = "PKKNDDLHKYKEZ652IHYDYLEPWG"
-ALPACA_SECRET_KEY = "6U4NZ8WYvkMBoruNjXe3AFDDL32ypp4YEbSnkQqV1KCC"
-ALPACA_BASE_URL   = "https://paper-api.alpaca.markets"   # Paper = free fake money
-# When ready for REAL money, change to: "https://api.alpaca.markets"
+ALPACA_API_KEY    = "YOUR_ALPACA_API_KEY"
+ALPACA_SECRET_KEY = "YOUR_ALPACA_SECRET_KEY"
+ALPACA_BASE_URL   = "https://paper-api.alpaca.markets"
 
 HEADERS = {
-    "APCA-API-KEY-ID": ALPACA_API_KEY,
+    "APCA-API-KEY-ID":     ALPACA_API_KEY,
     "APCA-API-SECRET-KEY": ALPACA_SECRET_KEY,
-    "Content-Type": "application/json"
+    "Content-Type":        "application/json"
 }
 
+# Expanded stock list (15 stocks now!)
 US_STOCKS = {
     "AAPL":  "Apple",
     "TSLA":  "Tesla",
@@ -36,34 +36,37 @@ US_STOCKS = {
     "AMZN":  "Amazon",
     "NVDA":  "Nvidia",
     "META":  "Meta",
+    "NFLX":  "Netflix",
+    "AMD":   "AMD",
+    "PYPL":  "PayPal",
+    "DIS":   "Disney",
+    "BABA":  "Alibaba",
+    "UBER":  "Uber",
+    "SHOP":  "Shopify",
+    "COIN":  "Coinbase",
 }
 
-PORTFOLIO_FILE = "logs/alpaca_portfolio.json"
+from risk_manager import RiskManager
+risk = RiskManager(initial_balance=100000)
 
-
-# ─── Account Info ────────────────────────────────────────────────────────────
 
 def get_account():
-    """Get current balance and account status."""
     try:
         r = requests.get(f"{ALPACA_BASE_URL}/v2/account", headers=HEADERS, timeout=10)
         if r.status_code == 200:
-            data = r.json()
+            d = r.json()
             return {
-                "balance":    float(data["cash"]),
-                "portfolio":  float(data["portfolio_value"]),
-                "buying_power": float(data["buying_power"]),
-                "status":     data["status"]
+                "balance":      float(d["cash"]),
+                "portfolio":    float(d["portfolio_value"]),
+                "buying_power": float(d["buying_power"]),
             }
     except Exception as e:
         print(f"❌ Account error: {e}")
     return None
 
 
-# ─── Price Data ───────────────────────────────────────────────────────────────
-
-def get_price_data(symbol, days=100):
-    """Fetch historical OHLCV data — Alpaca first, yfinance as fallback."""
+def get_price_data(symbol, days=150):
+    """Alpaca first, yfinance fallback — always gets data."""
     try:
         end   = datetime.now()
         start = end - timedelta(days=days + 50)
@@ -73,47 +76,29 @@ def get_price_data(symbol, days=100):
             "start":     start.strftime("%Y-%m-%dT%H:%M:%SZ"),
             "end":       end.strftime("%Y-%m-%dT%H:%M:%SZ"),
             "limit":     200,
-            "feed":      "iex"   # IEX feed works outside market hours
+            "feed":      "iex"
         }
-        r = requests.get(url, headers=HEADERS, params=params, timeout=15)
+        r    = requests.get(url, headers=HEADERS, params=params, timeout=15)
         bars = []
         if r.status_code == 200:
             bars = r.json().get("bars", [])
 
-        # Fallback to yfinance if Alpaca returns no data (market closed etc)
         if len(bars) < 50:
-            print(f"  ℹ️ Alpaca no data for {symbol} — using yfinance fallback")
-            try:
-                import yfinance as yf
-                df_yf = yf.download(symbol, period="150d", interval="1d",
-                                    auto_adjust=True, progress=False)
-                if len(df_yf) < 50:
-                    return None
-                if isinstance(df_yf.columns, __import__("pandas").MultiIndex):
-                    df_yf.columns = df_yf.columns.get_level_values(0)
-                df_yf = df_yf[["Open","High","Low","Close","Volume"]].astype(float).dropna()
-                df = df_yf.reset_index(drop=True)
-                # Add indicators
-                df["RSI"]         = ta.rsi(df["Close"], length=14)
-                macd              = ta.macd(df["Close"])
-                df["MACD"]        = macd["MACD_12_26_9"]
-                df["MACD_Signal"] = macd["MACDs_12_26_9"]
-                df["EMA_20"]      = ta.ema(df["Close"], length=20)
-                df["EMA_50"]      = ta.ema(df["Close"], length=50)
-                bb                = ta.bbands(df["Close"], length=20)
-                df["BB_Upper"]    = bb[bb.columns[0]]
-                df["BB_Mid"]      = bb[bb.columns[1]]
-                df["BB_Lower"]    = bb[bb.columns[2]]
-                return df.dropna().reset_index(drop=True)
-            except Exception as e:
-                print(f"  ❌ yfinance fallback also failed: {e}")
+            print(f"  ℹ️ Using yfinance fallback for {symbol}")
+            import yfinance as yf
+            df_yf = yf.download(symbol, period="200d", interval="1d",
+                                auto_adjust=True, progress=False)
+            if len(df_yf) < 50:
                 return None
+            if isinstance(df_yf.columns, pd.MultiIndex):
+                df_yf.columns = df_yf.columns.get_level_values(0)
+            df = df_yf[["Open","High","Low","Close","Volume"]].astype(float).dropna().reset_index(drop=True)
+        else:
+            df = pd.DataFrame(bars)
+            df = df.rename(columns={"o":"Open","h":"High","l":"Low","c":"Close","v":"Volume"})
+            df = df.astype(float)
 
-        df = pd.DataFrame(bars)
-        df = df.rename(columns={"o":"Open","h":"High","l":"Low","c":"Close","v":"Volume"})
-        df["Close"] = df["Close"].astype(float)
-
-        # Add technical indicators (same as your existing system)
+        # Add indicators
         df["RSI"]         = ta.rsi(df["Close"], length=14)
         macd              = ta.macd(df["Close"])
         df["MACD"]        = macd["MACD_12_26_9"]
@@ -124,194 +109,214 @@ def get_price_data(symbol, days=100):
         df["BB_Upper"]    = bb[bb.columns[0]]
         df["BB_Mid"]      = bb[bb.columns[1]]
         df["BB_Lower"]    = bb[bb.columns[2]]
+        df["ATR"]         = ta.atr(df["High"], df["Low"], df["Close"], length=14)
 
         return df.dropna().reset_index(drop=True)
 
     except Exception as e:
-        print(f"❌ Price fetch error for {symbol}: {e}")
+        print(f"  ❌ Data error {symbol}: {e}")
         return None
 
 
-# ─── Order Execution ─────────────────────────────────────────────────────────
+def get_signal(df):
+    """Multi-indicator signal with confidence score."""
+    last   = df.iloc[-1]
+    second = df.iloc[-2]
+    buy_s  = 0
+    sell_s = 0
+
+    # RSI
+    if last["RSI"] < 30:   buy_s  += 3   # Very oversold
+    elif last["RSI"] < 40: buy_s  += 1
+    elif last["RSI"] > 70: sell_s += 3   # Very overbought
+    elif last["RSI"] > 60: sell_s += 1
+
+    # MACD crossover
+    if last["MACD"] > last["MACD_Signal"] and second["MACD"] <= second["MACD_Signal"]:
+        buy_s += 3
+    elif last["MACD"] < last["MACD_Signal"] and second["MACD"] >= second["MACD_Signal"]:
+        sell_s += 3
+
+    # EMA trend
+    if last["Close"] > last["EMA_20"] > last["EMA_50"]:   buy_s  += 2
+    elif last["Close"] < last["EMA_20"] < last["EMA_50"]: sell_s += 2
+
+    # Bollinger
+    if last["Close"] <= last["BB_Lower"]:   buy_s  += 2
+    elif last["Close"] >= last["BB_Upper"]: sell_s += 2
+
+    # Volume confirmation
+    avg_vol = df["Volume"].iloc[-10:].mean()
+    if last["Volume"] > avg_vol * 1.5:
+        buy_s  += 1 if buy_s > sell_s else 0
+        sell_s += 1 if sell_s > buy_s else 0
+
+    # ATR filter
+    if last["ATR"] > df["ATR"].mean() * 3:
+        return "HOLD", 0   # Too volatile
+
+    confidence = max(buy_s, sell_s) / 10.0
+
+    if buy_s  >= 4: return "BUY",  confidence
+    if sell_s >= 4: return "SELL", confidence
+    return "HOLD", 0
+
 
 def place_order(symbol, qty, side):
-    """Place a buy or sell order on Alpaca."""
     try:
-        order = {
-            "symbol":        symbol,
-            "qty":           str(qty),
-            "side":          side,        # "buy" or "sell"
-            "type":          "market",
-            "time_in_force": "day"
-        }
         r = requests.post(
             f"{ALPACA_BASE_URL}/v2/orders",
             headers=HEADERS,
-            json=order,
+            json={
+                "symbol": symbol, "qty": str(qty),
+                "side": side, "type": "market", "time_in_force": "day"
+            },
             timeout=10
         )
         if r.status_code in [200, 201]:
-            data = r.json()
-            print(f"  ✅ Order placed: {side.upper()} {qty} {symbol} | ID: {data['id'][:8]}...")
-            return data
+            print(f"  ✅ {side.upper()} {qty} {symbol}")
+            return r.json()
         else:
-            print(f"  ❌ Order failed: {r.text}")
-            return None
+            print(f"  ❌ Order failed: {r.text[:100]}")
     except Exception as e:
         print(f"  ❌ Order error: {e}")
-        return None
+    return None
 
 
 def get_positions():
-    """Get all currently held positions."""
     try:
         r = requests.get(f"{ALPACA_BASE_URL}/v2/positions", headers=HEADERS, timeout=10)
         if r.status_code == 200:
-            positions = {}
-            for p in r.json():
-                positions[p["symbol"]] = {
-                    "shares":    float(p["qty"]),
-                    "buy_price": float(p["avg_entry_price"]),
-                    "current":   float(p["current_price"]),
-                    "profit":    float(p["unrealized_pl"]),
+            return {
+                p["symbol"]: {
+                    "shares":     float(p["qty"]),
+                    "buy_price":  float(p["avg_entry_price"]),
+                    "current":    float(p["current_price"]),
+                    "profit":     float(p["unrealized_pl"]),
                     "profit_pct": float(p["unrealized_plpc"]) * 100
                 }
-            return positions
+                for p in r.json()
+            }
     except Exception as e:
         print(f"❌ Positions error: {e}")
     return {}
 
 
-# ─── AI Decision ─────────────────────────────────────────────────────────────
+def run_us_trader():
+    try:
+        from telegram_alerts_v2 import alert_buy, alert_sell, alert_daily_summary
+    except:
+        def alert_buy(*a, **k): pass
+        def alert_sell(*a, **k): pass
+        def alert_daily_summary(*a, **k): pass
 
-def get_ai_signal(df):
-    """
-    Simple but effective signal logic using your indicators.
-    Later: replace this with your PPO model.
-    """
-    last   = df.iloc[-1]
-    second = df.iloc[-2]
-
-    buy_signals  = 0
-    sell_signals = 0
-
-    # RSI signal
-    if last["RSI"] < 35:   buy_signals  += 2   # Oversold = BUY
-    elif last["RSI"] > 65: sell_signals += 2   # Overbought = SELL
-
-    # MACD crossover
-    if last["MACD"] > last["MACD_Signal"] and second["MACD"] <= second["MACD_Signal"]:
-        buy_signals += 2
-    elif last["MACD"] < last["MACD_Signal"] and second["MACD"] >= second["MACD_Signal"]:
-        sell_signals += 2
-
-    # Price vs EMA trend
-    if last["Close"] > last["EMA_20"] > last["EMA_50"]:
-        buy_signals += 1
-    elif last["Close"] < last["EMA_20"] < last["EMA_50"]:
-        sell_signals += 1
-
-    # Bollinger Band bounce
-    if last["Close"] <= last["BB_Lower"]:  buy_signals  += 1
-    elif last["Close"] >= last["BB_Upper"]: sell_signals += 1
-
-    if buy_signals >= 3:   return "BUY",  buy_signals
-    if sell_signals >= 3:  return "SELL", sell_signals
-    return "HOLD", 0
-
-
-# ─── Stop Loss Check ─────────────────────────────────────────────────────────
-
-def should_stop_loss(position, stop_pct=-0.05):
-    """Force sell if loss exceeds stop_pct (default -5%)."""
-    return position["profit_pct"] / 100 <= stop_pct
-
-
-# ─── Main Trading Loop ───────────────────────────────────────────────────────
-
-def run_us_trader(model=None):
-    """Main function — run this every day."""
-    from telegram_alerts_v2 import alert_buy, alert_sell, alert_daily_summary
-    print("\n🇺🇸 US STOCK TRADER (ALPACA PAPER)")
-    print("=" * 50)
+    print("\n🇺🇸 US STOCK TRADER v2 (ALPACA)")
+    print("=" * 55)
     print(f"⏰ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
-    # Get account
     account = get_account()
     if not account:
-        print("❌ Cannot connect to Alpaca. Check your API keys.")
+        print("❌ Cannot connect to Alpaca")
         return
 
-    print(f"💰 Balance:       ${account['balance']:,.2f}")
-    print(f"📦 Portfolio:     ${account['portfolio']:,.2f}")
-    print(f"⚡ Buying Power:  ${account['buying_power']:,.2f}")
-    print("=" * 50)
+    print(f"💰 Balance:      ${account['balance']:,.2f}")
+    print(f"📦 Portfolio:    ${account['portfolio']:,.2f}")
+    print(f"⚡ Buying Power: ${account['buying_power']:,.2f}")
 
-    positions   = get_positions()
-    daily_pnl   = 0
-    invest_each = account["buying_power"] * 0.10   # 10% per stock max
+    # Risk check
+    risk.update_peak(account["portfolio"])
+    can_trade, reason = risk.can_trade(account["portfolio"])
+    if not can_trade:
+        print(f"\n{reason}")
+        try:
+            from telegram_alerts_v2 import send_alert
+            send_alert(reason, "error")
+        except:
+            pass
+        return
+
+    print("=" * 55)
+
+    positions  = get_positions()
+    daily_pnl  = 0
+    invest_amt = account["buying_power"] * 0.08   # 8% per trade (safer)
 
     for symbol, name in US_STOCKS.items():
         print(f"\n📥 {name} ({symbol})...")
 
         df = get_price_data(symbol)
         if df is None:
-            print(f"  ⚠️ No data for {symbol}")
             continue
 
-        current_price = float(df["Close"].iloc[-1])
-        signal, strength = get_ai_signal(df)
+        price  = float(df["Close"].iloc[-1])
+        signal, confidence = get_signal(df)
 
-        # ── Stop Loss Check ──
+        # ── Stop Loss & Take Profit Check ──────────────────
         if symbol in positions:
             pos = positions[symbol]
-            if should_stop_loss(pos):
-                print(f"  🛑 STOP LOSS triggered! Loss: {pos['profit_pct']:.1f}%")
+
+            # Stop Loss
+            if risk.should_stop_loss(pos["buy_price"], price):
+                print(f"  🛑 STOP LOSS! Loss: {pos['profit_pct']:.1f}%")
                 order = place_order(symbol, int(pos["shares"]), "sell")
                 if order:
-                    alert_sell(name, int(pos["shares"]), current_price,
-                                pos["profit"], market="US")
+                    risk.record_trade()
+                    alert_sell(name, int(pos["shares"]), price, pos["profit"], "US")
                     daily_pnl += pos["profit"]
                 continue
 
-        print(f"  💲 Price: ${current_price:.2f} | Signal: {signal} (strength: {strength})")
+            # Take Profit
+            if risk.should_take_profit(pos["buy_price"], price):
+                print(f"  💰 TAKE PROFIT! Gain: {pos['profit_pct']:.1f}%")
+                order = place_order(symbol, int(pos["shares"]), "sell")
+                if order:
+                    risk.record_trade()
+                    alert_sell(name, int(pos["shares"]), price, pos["profit"], "US")
+                    daily_pnl += pos["profit"]
+                continue
 
-        # ── Execute Signal ──
+        print(f"  💲 ${price:.2f} | Signal: {signal} | Confidence: {confidence:.0%}")
+
+        # ── Execute Signal ──────────────────────────────────
         if signal == "BUY" and symbol not in positions:
-            shares = int(invest_each // current_price)
+            shares = int(invest_amt // price)
             if shares > 0:
                 order = place_order(symbol, shares, "buy")
                 if order:
-                    alert_buy(name, shares, current_price, market="US")
+                    risk.record_trade()
+                    alert_buy(name, shares, price, "US")
 
         elif signal == "SELL" and symbol in positions:
-            pos    = positions[symbol]
-            shares = int(pos["shares"])
-            order  = place_order(symbol, shares, "sell")
+            pos   = positions[symbol]
+            order = place_order(symbol, int(pos["shares"]), "sell")
             if order:
-                alert_sell(name, shares, current_price, pos["profit"], market="US")
+                risk.record_trade()
+                alert_sell(name, int(pos["shares"]), price, pos["profit"], "US")
                 daily_pnl += pos["profit"]
 
         else:
             print(f"  ⏸️ HOLDING")
 
-        time.sleep(0.5)   # Be polite to the API
+        time.sleep(0.3)
 
-    # ── Daily Summary ──
+    # Summary
+    account_after = get_account()
     positions_after = get_positions()
-    account_after   = get_account()
-    total_profit    = sum(p["profit"] for p in positions_after.values())
+    open_pnl = sum(p["profit"] for p in positions_after.values())
+    risk_stats = risk.get_stats(account_after["portfolio"])
 
-    print("\n" + "=" * 50)
-    print("📊 SESSION DONE")
-    print(f"💰 Balance: ${account_after['balance']:,.2f}")
-    print(f"📈 Open P/L: ${total_profit:,.2f}")
-    print(f"📅 Today's Trades P/L: ${daily_pnl:,.2f}")
-    print("=" * 50)
+    print("\n" + "=" * 55)
+    print("📊 US SESSION DONE")
+    print(f"💰 Balance:       ${account_after['balance']:,.2f}")
+    print(f"📈 Open P/L:      ${open_pnl:,.2f}")
+    print(f"📅 Today Trades:  ${daily_pnl:,.2f}")
+    print(f"📉 Drawdown:      {risk_stats['drawdown']:.1f}%")
+    print(f"🔢 Trades today:  {risk_stats['trades_today']}")
+    print("=" * 55)
 
     alert_daily_summary(
         balance=account_after["balance"],
-        total_profit=total_profit,
+        total_profit=open_pnl,
         holdings_count=len(positions_after),
         daily_pnl=daily_pnl,
         market="🇺🇸 US Stocks"
