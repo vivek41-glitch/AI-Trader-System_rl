@@ -1,26 +1,33 @@
 import time
-from datetime import datetime, timedelta
+import subprocess
+from datetime import datetime
 import pytz
 
 # ============================================
-# RAILWAY SMART RUNNER — FULL $5 OPTIMIZED
-# Runs exactly 8hrs 20min per day
-# Uses full $5 Railway credit every month
-# Costs $0 forever — resets every month!
+# RAILWAY SMART RUNNER v3 — PHASE 2 UPDATED
+# Now trades ALL markets:
+# 🇺🇸 US Stocks (15 stocks)
+# 💱 Forex (8 pairs)
+# 🪙 Crypto (10 coins — 24/7!)
+# 🥇 Commodities (Gold, Silver, Oil etc)
+# 📰 News briefing before US market opens
 #
 # Schedule (IST):
-# 6:57 PM  → Start (3 min before NYSE)
-# 7:00 PM  → US market open → trading begins
-# 1:30 AM  → US market closes
-# 3:17 AM  → Shutdown (used full $5 worth)
+# 6:30 PM → 📰 News briefing sent to Telegram
+# 6:57 PM → 🟢 Server wakes up
+# 7:00 PM → All markets start trading
+# 3:17 AM → 😴 Server sleeps
+# Cost: ~$4.98/month (Railway free = $5)
 # ============================================
 
 IST = pytz.timezone("Asia/Kolkata")
 
-US_CHECK_MINS    = 30
-FOREX_CHECK_MINS = 60
+US_CHECK_MINS          = 30
+FOREX_CHECK_MINS       = 60
+CRYPTO_CHECK_MINS      = 45   # Crypto more active — check more often
+COMMODITIES_CHECK_MINS = 90   # Slower moving
 
-# ── Load traders ─────────────────────────────
+# ── Load all traders ──────────────────────────
 US_AVAILABLE = False
 try:
     from alpaca_us_trader import run_us_trader
@@ -33,17 +40,40 @@ FOREX_AVAILABLE = False
 try:
     from twelvedata_forex_trader import run_twelvedata_forex_trader
     FOREX_AVAILABLE = True
-    print("✅ Forex (Twelve Data) loaded")
+    print("✅ Forex trader loaded")
 except Exception as e:
     print(f"⚠️ Forex: {e}")
+
+CRYPTO_AVAILABLE = False
+try:
+    from crypto_commodities_trader import run_crypto_trader
+    CRYPTO_AVAILABLE = True
+    print("✅ Crypto trader loaded")
+except Exception as e:
+    print(f"⚠️ Crypto: {e}")
+
+COMMODITIES_AVAILABLE = False
+try:
+    from crypto_commodities_trader import run_commodities_trader
+    COMMODITIES_AVAILABLE = True
+    print("✅ Commodities trader loaded")
+except Exception as e:
+    print(f"⚠️ Commodities: {e}")
+
+NEWS_AVAILABLE = False
+try:
+    from news_sentiment import morning_market_briefing
+    NEWS_AVAILABLE = True
+    print("✅ News sentiment loaded")
+except Exception as e:
+    print(f"⚠️ News: {e}")
 
 
 def safe_run(fn, name):
     try:
-        now = datetime.now(IST).strftime("%H:%M:%S IST")
-        print(f"\n{'='*50}")
-        print(f"🚀 {name} — {now}")
-        print(f"{'='*50}")
+        print(f"\n{'='*55}")
+        print(f"🚀 {name} — {datetime.now(IST).strftime('%H:%M:%S IST')}")
+        print(f"{'='*55}")
         fn()
         print(f"✅ DONE: {name}")
     except Exception as e:
@@ -55,24 +85,8 @@ def safe_run(fn, name):
             pass
 
 
-def get_shutdown_time():
-    """Calculate today's shutdown time — 3:17 AM IST next day."""
-    now = datetime.now(IST)
-    # Shutdown at 3:17 AM next day
-    shutdown = now.replace(hour=3, minute=17, second=0, microsecond=0)
-    if now.hour < 12:
-        # We're already past midnight, shutdown is today at 3:17 AM
-        pass
-    else:
-        # Shutdown is tomorrow at 3:17 AM
-        shutdown += timedelta(days=1)
-    return shutdown
-
-
 def should_shutdown():
-    """Return True if it's past 3:17 AM IST."""
     now = datetime.now(IST)
-    # Shutdown window: 3:17 AM to 6:56 PM (when market prep starts)
     if 3 <= now.hour < 18:
         return True
     if now.hour == 3 and now.minute >= 17:
@@ -81,124 +95,129 @@ def should_shutdown():
 
 
 def wait_until_market_prep():
-    """Wait until 6:57 PM IST — 3 min before NYSE opens."""
     while True:
         now = datetime.now(IST)
-        
-        # Target: 6:57 PM IST
-        target = now.replace(hour=18, minute=57, second=0, microsecond=0)
-        
-        if now >= target and now.hour >= 18:
-            print(f"\n⚡ 6:57 PM IST reached! Starting up...")
+        if now.hour == 18 and now.minute >= 57:
             return
-        
-        # Calculate wait time
+        if now.hour >= 19:
+            return
+        now_ts  = time.time()
+        target  = now.replace(hour=18, minute=57, second=0)
         if now < target:
-            wait_secs = (target - now).total_seconds()
+            wait  = (target - now).total_seconds()
+            hrs   = int(wait // 3600)
+            mins  = int((wait % 3600) // 60)
+            print(f"😴 Sleeping... Waking at 6:57 PM IST (in {hrs}h {mins}m)")
+            time.sleep(min(600, wait))
         else:
-            # Already past 6:57 PM — start immediately
             return
 
-        hours   = int(wait_secs // 3600)
-        minutes = int((wait_secs % 3600) // 60)
-        
-        print(f"😴 Sleeping... Next start: 6:57 PM IST "
-              f"(in {hours}h {minutes}m) — {now.strftime('%H:%M IST')}")
-        
-        # Sleep in chunks — wake up every 10 min to print status
-        sleep_time = min(600, wait_secs)
-        time.sleep(sleep_time)
 
-
-# ── MAIN LOOP ─────────────────────────────────
+# ── STARTUP ───────────────────────────────────
 print("\n" + "="*55)
-print("  🤖 RAILWAY SMART RUNNER — $5 OPTIMIZED")
+print("  🤖 RAILWAY RUNNER v3 — ALL MARKETS")
 print("="*55)
-print("  Daily Schedule (IST):")
-print("  6:57 PM  → 🟢 Wake up (3 min before NYSE)")
-print("  7:00 PM  → 🇺🇸 US trading starts")
-print("  7:00 PM  → 💱 Forex check #1")
-print("  ...every 30min US, 60min Forex...")
-print("  1:30 AM  → 🇺🇸 US final check")
-print("  2:00 AM  → 💱 Forex bonus check")
-print("  2:30 AM  → 💱 Forex bonus check")
-print("  3:17 AM  → 🔴 Sleep till tomorrow")
+print("  Schedule (IST):")
+print("  6:30 PM → 📰 News briefing")
+print("  6:57 PM → 🟢 Wake up")
+print("  7:00 PM → 🇺🇸 US + 💱 Forex + 🪙 Crypto + 🥇 Gold")
+print("  Every 30min → US check")
+print("  Every 45min → Crypto check")
+print("  Every 60min → Forex check")
+print("  Every 90min → Commodities check")
+print("  3:17 AM → 😴 Sleep")
 print("="*55)
-print("  💰 Cost: $4.98/month")
-print("  🎁 Credit: $5.00/month (Railway free)")
-print("  💵 Your cost: $0.00 FOREVER!")
+print("  💰 Cost: $4.98/month (Railway free $5)")
 print("="*55)
 
 try:
     from telegram_alerts_v2 import send_alert
     send_alert(
-        "🤖 Railway Smart Runner LIVE!\n"
-        "🇺🇸 US + 💱 Forex\n"
-        "Runs 6:57 PM - 3:17 AM IST\n"
+        "🚀 Railway v3 LIVE!\n"
+        "🇺🇸 US + 💱 Forex + 🪙 10 Crypto\n"
+        "🥇 Gold + Silver + Oil\n"
+        "📰 News sentiment active\n"
         "Cost: $0 forever! 😄",
         "start"
     )
 except:
     pass
 
-# ── DAILY LOOP ────────────────────────────────
+# ── MAIN LOOP ─────────────────────────────────
+last_us          = 0
+last_forex       = 0
+last_crypto      = 0
+last_commodities = 0
+last_news        = 0
+last_retrain     = 0
+news_briefing_done = False
+
+# Run everything once on startup
+print("\n⚡ Running all markets on startup...\n")
+if US_AVAILABLE:          safe_run(run_us_trader,            "US Trader")
+if FOREX_AVAILABLE:       safe_run(run_twelvedata_forex_trader, "Forex Trader")
+if CRYPTO_AVAILABLE:      safe_run(run_crypto_trader,        "Crypto Trader")
+if COMMODITIES_AVAILABLE: safe_run(run_commodities_trader,   "Commodities Trader")
+
+last_us = last_forex = last_crypto = last_commodities = time.time()
+print("\n✅ All markets started! Running forever...\n")
+
 while True:
-    now = datetime.now(IST)
-    
-    # If it's shutdown time — sleep until 6:57 PM
+    now     = time.time()
+    now_ist = datetime.now(IST)
+
+    # News briefing at 6:30 PM
+    if now_ist.hour == 18 and now_ist.minute >= 30 and not news_briefing_done:
+        if NEWS_AVAILABLE:
+            safe_run(morning_market_briefing, "📰 News Briefing")
+        news_briefing_done = True
+    if now_ist.hour == 19:
+        news_briefing_done = False   # Reset for tomorrow
+
+    # Shutdown check
     if should_shutdown():
-        print(f"\n🔴 3:17 AM passed — going to sleep")
-        print(f"   Used full $5 worth today ✅")
-        print(f"   Waking up at 6:57 PM IST\n")
+        print(f"\n🔴 3:17 AM — going to sleep")
         try:
             from telegram_alerts_v2 import send_alert
-            send_alert(
-                "😴 Bot sleeping now\n"
-                "Used full daily budget ✅\n"
-                "Waking up 6:57 PM IST",
-                "info"
-            )
+            send_alert("😴 Bot sleeping\nUsed full daily budget ✅\nWaking 6:57 PM IST", "info")
         except:
             pass
         wait_until_market_prep()
+        # Reset timers after waking up
+        last_us = last_forex = last_crypto = last_commodities = 0
 
-    # Send startup alert
-    print(f"\n🟢 ACTIVE — {now.strftime('%d %b %Y, %H:%M IST')}")
-    try:
-        from telegram_alerts_v2 import send_alert
-        send_alert(
-            "🟢 Bot is ACTIVE now!\n"
-            "🇺🇸 US market opens in 3 min\n"
-            "Trading begins! 🚀",
-            "start"
-        )
-    except:
-        pass
+    # US check every 30 min
+    if US_AVAILABLE and (now - last_us) >= US_CHECK_MINS * 60:
+        safe_run(run_us_trader, "US Trader")
+        last_us = now
 
-    # ── TRADING SESSION LOOP ──────────────────
-    last_us    = 0
-    last_forex = 0
+    # Forex check every 60 min
+    if FOREX_AVAILABLE and (now - last_forex) >= FOREX_CHECK_MINS * 60:
+        safe_run(run_twelvedata_forex_trader, "Forex Trader")
+        last_forex = now
 
-    while not should_shutdown():
-        now_ts = time.time()
+    # Crypto every 45 min
+    if CRYPTO_AVAILABLE and (now - last_crypto) >= CRYPTO_CHECK_MINS * 60:
+        safe_run(run_crypto_trader, "Crypto Trader")
+        last_crypto = now
 
-        # US check every 30 min
-        if US_AVAILABLE and (now_ts - last_us) >= US_CHECK_MINS * 60:
-            safe_run(run_us_trader, "🇺🇸 US Trader")
-            last_us = now_ts
+    # Commodities every 90 min
+    if COMMODITIES_AVAILABLE and (now - last_commodities) >= COMMODITIES_CHECK_MINS * 60:
+        safe_run(run_commodities_trader, "Commodities Trader")
+        last_commodities = now
 
-        # Forex check every 60 min
-        if FOREX_AVAILABLE and (now_ts - last_forex) >= FOREX_CHECK_MINS * 60:
-            safe_run(run_twelvedata_forex_trader, "💱 Forex Trader")
-            last_forex = now_ts
+    # Weekly retrain reminder
+    if now_ist.weekday() == 6 and now_ist.hour == 10 and (now - last_retrain) > 3600:
+        try:
+            from telegram_alerts_v2 import send_alert
+            send_alert(
+                "🧠 Weekly Reminder!\n"
+                "Run on your laptop:\n"
+                "python train_all_stocks.py\n"
+                "Train AI on 50 stocks!", "info"
+            )
+        except:
+            pass
+        last_retrain = now
 
-        # Show heartbeat every hour
-        now_ist = datetime.now(IST)
-        if now_ist.minute == 0:
-            print(f"💓 Bot alive — {now_ist.strftime('%H:%M IST')} "
-                  f"| Shutdown at 3:17 AM IST")
-
-        time.sleep(60)
-
-    # Session ended — go back to top of while loop
-    print(f"\n✅ Session complete! Going to sleep...")
+    time.sleep(60)
