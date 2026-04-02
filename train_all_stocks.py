@@ -203,7 +203,7 @@ def train_on_all_stocks():
         batch_size=64,
         n_epochs=10,
         gamma=0.99,
-        ent_coef=0.01,
+        ent_coef=0.05,
         clip_range=0.2,
         max_grad_norm=0.5,        # Gradient clipping — prevents NaN in weights!
         verbose=1,
@@ -211,7 +211,8 @@ def train_on_all_stocks():
     )
 
     model.learn(
-        total_timesteps=2_000_000,
+
+        total_timesteps=3_000_000,
         progress_bar=True
     )
 
