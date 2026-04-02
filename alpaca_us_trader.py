@@ -4,17 +4,16 @@ import numpy as np
 import pandas_ta as ta
 from datetime import datetime, timedelta
 import time
-import json
-import os
 
 # ============================================
-# ALPACA US TRADER v2
-# NOW WITH:
-# ✅ Risk Manager connected
-# ✅ Stop Loss (-5%)
-# ✅ Take Profit (+8%)
-# ✅ yfinance fallback when market closed
-# ✅ More stocks (15 instead of 7)
+# ALPACA US TRADER v3 — PHASE 3 FULL UPGRADE
+# Now uses:
+# ✅ Ensemble (3 models vote)
+# ✅ Position Sizer (smart sizing)
+# ✅ Market Regime Detection
+# ✅ Risk Manager
+# ✅ 15 stocks
+# ✅ Stop Loss + Take Profit
 # ============================================
 
 ALPACA_API_KEY    = "YOUR_ALPACA_API_KEY"
@@ -27,27 +26,34 @@ HEADERS = {
     "Content-Type":        "application/json"
 }
 
-# Expanded stock list (15 stocks now!)
 US_STOCKS = {
-    "AAPL":  "Apple",
-    "TSLA":  "Tesla",
-    "MSFT":  "Microsoft",
-    "GOOGL": "Google",
-    "AMZN":  "Amazon",
-    "NVDA":  "Nvidia",
-    "META":  "Meta",
-    "NFLX":  "Netflix",
-    "AMD":   "AMD",
-    "PYPL":  "PayPal",
-    "DIS":   "Disney",
-    "BABA":  "Alibaba",
-    "UBER":  "Uber",
-    "SHOP":  "Shopify",
-    "COIN":  "Coinbase",
+    "AAPL": "Apple",    "MSFT": "Microsoft", "GOOGL": "Google",
+    "AMZN": "Amazon",   "NVDA": "Nvidia",    "META":  "Meta",
+    "TSLA": "Tesla",    "NFLX": "Netflix",   "AMD":   "AMD",
+    "PYPL": "PayPal",   "DIS":  "Disney",    "UBER":  "Uber",
+    "SHOP": "Shopify",  "COIN": "Coinbase",  "BABA":  "Alibaba",
 }
 
-from risk_manager import RiskManager
-risk = RiskManager(initial_balance=100000)
+# Load Phase 3 components
+from risk_manager        import RiskManager
+from position_sizer      import PositionSizer
+from market_regime_detector import MarketRegimeDetector
+
+risk    = RiskManager(initial_balance=100000)
+sizer   = PositionSizer(base_pct=0.08, max_pct=0.18, min_pct=0.03)
+regime_detector = MarketRegimeDetector()
+
+# Load ensemble (lazy — loads on first use)
+_ensemble = None
+def get_ensemble():
+    global _ensemble
+    if _ensemble is None:
+        try:
+            from ensemble_trader import EnsembleTrader
+            _ensemble = EnsembleTrader()
+        except Exception as e:
+            print(f"⚠️ Ensemble not loaded: {e}")
+    return _ensemble
 
 
 def get_account():
@@ -61,12 +67,11 @@ def get_account():
                 "buying_power": float(d["buying_power"]),
             }
     except Exception as e:
-        print(f"❌ Account error: {e}")
+        print(f"❌ Account: {e}")
     return None
 
 
 def get_price_data(symbol, days=150):
-    """Alpaca first, yfinance fallback — always gets data."""
     try:
         end   = datetime.now()
         start = end - timedelta(days=days + 50)
@@ -75,8 +80,7 @@ def get_price_data(symbol, days=150):
             "timeframe": "1Day",
             "start":     start.strftime("%Y-%m-%dT%H:%M:%SZ"),
             "end":       end.strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "limit":     200,
-            "feed":      "iex"
+            "limit":     200, "feed": "iex"
         }
         r    = requests.get(url, headers=HEADERS, params=params, timeout=15)
         bars = []
@@ -84,10 +88,9 @@ def get_price_data(symbol, days=150):
             bars = r.json().get("bars", [])
 
         if len(bars) < 50:
-            print(f"  ℹ️ Using yfinance fallback for {symbol}")
             import yfinance as yf
             df_yf = yf.download(symbol, period="200d", interval="1d",
-                                auto_adjust=True, progress=False)
+                               auto_adjust=True, progress=False)
             if len(df_yf) < 50:
                 return None
             if isinstance(df_yf.columns, pd.MultiIndex):
@@ -98,7 +101,6 @@ def get_price_data(symbol, days=150):
             df = df.rename(columns={"o":"Open","h":"High","l":"Low","c":"Close","v":"Volume"})
             df = df.astype(float)
 
-        # Add indicators
         df["RSI"]         = ta.rsi(df["Close"], length=14)
         macd              = ta.macd(df["Close"])
         df["MACD"]        = macd["MACD_12_26_9"]
@@ -110,7 +112,6 @@ def get_price_data(symbol, days=150):
         df["BB_Mid"]      = bb[bb.columns[1]]
         df["BB_Lower"]    = bb[bb.columns[2]]
         df["ATR"]         = ta.atr(df["High"], df["Low"], df["Close"], length=14)
-
         return df.dropna().reset_index(drop=True)
 
     except Exception as e:
@@ -118,66 +119,20 @@ def get_price_data(symbol, days=150):
         return None
 
 
-def get_signal(df):
-    """Multi-indicator signal with confidence score."""
-    last   = df.iloc[-1]
-    second = df.iloc[-2]
-    buy_s  = 0
-    sell_s = 0
-
-    # RSI
-    if last["RSI"] < 30:   buy_s  += 3   # Very oversold
-    elif last["RSI"] < 40: buy_s  += 1
-    elif last["RSI"] > 70: sell_s += 3   # Very overbought
-    elif last["RSI"] > 60: sell_s += 1
-
-    # MACD crossover
-    if last["MACD"] > last["MACD_Signal"] and second["MACD"] <= second["MACD_Signal"]:
-        buy_s += 3
-    elif last["MACD"] < last["MACD_Signal"] and second["MACD"] >= second["MACD_Signal"]:
-        sell_s += 3
-
-    # EMA trend
-    if last["Close"] > last["EMA_20"] > last["EMA_50"]:   buy_s  += 2
-    elif last["Close"] < last["EMA_20"] < last["EMA_50"]: sell_s += 2
-
-    # Bollinger
-    if last["Close"] <= last["BB_Lower"]:   buy_s  += 2
-    elif last["Close"] >= last["BB_Upper"]: sell_s += 2
-
-    # Volume confirmation
-    avg_vol = df["Volume"].iloc[-10:].mean()
-    if last["Volume"] > avg_vol * 1.5:
-        buy_s  += 1 if buy_s > sell_s else 0
-        sell_s += 1 if sell_s > buy_s else 0
-
-    # ATR filter
-    if last["ATR"] > df["ATR"].mean() * 3:
-        return "HOLD", 0   # Too volatile
-
-    confidence = max(buy_s, sell_s) / 10.0
-
-    if buy_s  >= 4: return "BUY",  confidence
-    if sell_s >= 4: return "SELL", confidence
-    return "HOLD", 0
-
-
 def place_order(symbol, qty, side):
     try:
         r = requests.post(
             f"{ALPACA_BASE_URL}/v2/orders",
             headers=HEADERS,
-            json={
-                "symbol": symbol, "qty": str(qty),
-                "side": side, "type": "market", "time_in_force": "day"
-            },
+            json={"symbol": symbol, "qty": str(qty), "side": side,
+                  "type": "market", "time_in_force": "day"},
             timeout=10
         )
         if r.status_code in [200, 201]:
             print(f"  ✅ {side.upper()} {qty} {symbol}")
             return r.json()
         else:
-            print(f"  ❌ Order failed: {r.text[:100]}")
+            print(f"  ❌ Order failed: {r.text[:80]}")
     except Exception as e:
         print(f"  ❌ Order error: {e}")
     return None
@@ -194,24 +149,24 @@ def get_positions():
                     "current":    float(p["current_price"]),
                     "profit":     float(p["unrealized_pl"]),
                     "profit_pct": float(p["unrealized_plpc"]) * 100
-                }
-                for p in r.json()
+                } for p in r.json()
             }
-    except Exception as e:
-        print(f"❌ Positions error: {e}")
+    except:
+        pass
     return {}
 
 
 def run_us_trader():
     try:
-        from telegram_alerts_v2 import alert_buy, alert_sell, alert_daily_summary
+        from telegram_alerts_v2 import alert_buy, alert_sell, alert_daily_summary, send_alert
     except:
         def alert_buy(*a, **k): pass
         def alert_sell(*a, **k): pass
         def alert_daily_summary(*a, **k): pass
+        def send_alert(*a, **k): pass
 
-    print("\n🇺🇸 US STOCK TRADER v2 (ALPACA)")
-    print("=" * 55)
+    print("\n🇺🇸 US TRADER v3 — ENSEMBLE + REGIME + SMART SIZING")
+    print("=" * 60)
     print(f"⏰ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
     account = get_account()
@@ -219,27 +174,38 @@ def run_us_trader():
         print("❌ Cannot connect to Alpaca")
         return
 
-    print(f"💰 Balance:      ${account['balance']:,.2f}")
-    print(f"📦 Portfolio:    ${account['portfolio']:,.2f}")
-    print(f"⚡ Buying Power: ${account['buying_power']:,.2f}")
+    print(f"💰 Balance:   ${account['balance']:,.2f}")
+    print(f"📦 Portfolio: ${account['portfolio']:,.2f}")
 
     # Risk check
     risk.update_peak(account["portfolio"])
     can_trade, reason = risk.can_trade(account["portfolio"])
     if not can_trade:
         print(f"\n{reason}")
-        try:
-            from telegram_alerts_v2 import send_alert
-            send_alert(reason, "error")
-        except:
-            pass
+        send_alert(reason, "error")
         return
 
-    print("=" * 55)
+    # Get overall market regime from SPY
+    print("\n📊 Detecting market regime...")
+    spy_df = get_price_data("SPY")
+    market_regime = "SIDEWAYS"
+    if spy_df is not None:
+        market_regime, m_conf, m_desc = regime_detector.detect(spy_df)
+        emoji = regime_detector.get_emoji(market_regime)
+        print(f"  {emoji} Market: {market_regime} ({m_conf:.0%}) — {m_desc}")
 
-    positions  = get_positions()
-    daily_pnl  = 0
-    invest_amt = account["buying_power"] * 0.08   # 8% per trade (safer)
+        if market_regime == "STRONG_BEAR":
+            msg = f"🛑 STRONG BEAR market detected!\nReducing all positions."
+            print(f"\n{msg}")
+            send_alert(msg, "error")
+
+    trade_mult = regime_detector.get_trade_multiplier(market_regime)
+    print(f"  💰 Trade size multiplier: {trade_mult:.1f}x")
+    print("=" * 60)
+
+    ensemble  = get_ensemble()
+    positions = get_positions()
+    daily_pnl = 0
 
     for symbol, name in US_STOCKS.items():
         print(f"\n📥 {name} ({symbol})...")
@@ -248,39 +214,83 @@ def run_us_trader():
         if df is None:
             continue
 
-        price  = float(df["Close"].iloc[-1])
-        signal, confidence = get_signal(df)
+        price = float(df["Close"].iloc[-1])
 
-        # ── Stop Loss & Take Profit Check ──────────────────
+        # Detect individual stock regime
+        stock_regime, s_conf, s_desc = regime_detector.detect(df)
+        s_emoji = regime_detector.get_emoji(stock_regime)
+
+        # Stop Loss & Take Profit
         if symbol in positions:
             pos = positions[symbol]
-
-            # Stop Loss
             if risk.should_stop_loss(pos["buy_price"], price):
                 print(f"  🛑 STOP LOSS! Loss: {pos['profit_pct']:.1f}%")
                 order = place_order(symbol, int(pos["shares"]), "sell")
                 if order:
                     risk.record_trade()
+                    sizer.record_trade(pos["profit_pct"] / 100)
                     alert_sell(name, int(pos["shares"]), price, pos["profit"], "US")
                     daily_pnl += pos["profit"]
                 continue
 
-            # Take Profit
             if risk.should_take_profit(pos["buy_price"], price):
                 print(f"  💰 TAKE PROFIT! Gain: {pos['profit_pct']:.1f}%")
                 order = place_order(symbol, int(pos["shares"]), "sell")
                 if order:
                     risk.record_trade()
+                    sizer.record_trade(pos["profit_pct"] / 100)
                     alert_sell(name, int(pos["shares"]), price, pos["profit"], "US")
                     daily_pnl += pos["profit"]
                 continue
 
-        print(f"  💲 ${price:.2f} | Signal: {signal} | Confidence: {confidence:.0%}")
+            # Bear regime → sell holdings
+            if regime_detector.should_sell_holdings(market_regime) and not regime_detector.should_buy(stock_regime):
+                print(f"  📉 Selling due to bear regime")
+                order = place_order(symbol, int(positions[symbol]["shares"]), "sell")
+                if order:
+                    risk.record_trade()
+                    alert_sell(name, int(positions[symbol]["shares"]), price,
+                               positions[symbol]["profit"], "US")
+                    daily_pnl += positions[symbol]["profit"]
+                continue
 
-        # ── Execute Signal ──────────────────────────────────
+        # Get ensemble vote
+        if ensemble:
+            signal, conf, breakdown = ensemble.vote(df, account["balance"], symbol)
+            ensemble.print_breakdown(symbol, price, breakdown)
+            signal_strength = breakdown["buy_votes"] if signal == "BUY" else breakdown["sell_votes"]
+        else:
+            # Fallback signal
+            last = df.iloc[-1]
+            if last["RSI"] < 35 and last["MACD"] > last["MACD_Signal"]:
+                signal, conf, signal_strength = "BUY", 0.6, 2
+            elif last["RSI"] > 65 and last["MACD"] < last["MACD_Signal"]:
+                signal, conf, signal_strength = "SELL", 0.6, 2
+            else:
+                signal, conf, signal_strength = "HOLD", 0.0, 0
+
+        print(f"  {s_emoji} Stock regime: {stock_regime} | Signal: {signal} ({conf:.0%})")
+
+        # Skip buying in bad regimes
+        if signal == "BUY" and not regime_detector.should_buy(stock_regime):
+            print(f"  ⏭️ Skipping BUY — bad regime ({stock_regime})")
+            continue
+
+        # Calculate position size
+        atr_pct = float(df["ATR"].iloc[-1]) / price if price > 0 else 0.02
+        invest_amt, invest_pct, size_reason = sizer.calculate(
+            balance=account["buying_power"],
+            confidence=conf,
+            volatility_pct=atr_pct,
+            signal_strength=signal_strength
+        )
+        # Apply regime multiplier
+        invest_amt *= trade_mult
+
         if signal == "BUY" and symbol not in positions:
             shares = int(invest_amt // price)
             if shares > 0:
+                print(f"  💰 Size: ${invest_amt:,.0f} ({invest_pct}%) — {size_reason}")
                 order = place_order(symbol, shares, "buy")
                 if order:
                     risk.record_trade()
@@ -291,6 +301,7 @@ def run_us_trader():
             order = place_order(symbol, int(pos["shares"]), "sell")
             if order:
                 risk.record_trade()
+                sizer.record_trade(pos["profit_pct"] / 100)
                 alert_sell(name, int(pos["shares"]), price, pos["profit"], "US")
                 daily_pnl += pos["profit"]
 
@@ -300,26 +311,29 @@ def run_us_trader():
         time.sleep(0.3)
 
     # Summary
-    account_after = get_account()
+    account_after   = get_account()
     positions_after = get_positions()
-    open_pnl = sum(p["profit"] for p in positions_after.values())
-    risk_stats = risk.get_stats(account_after["portfolio"])
+    open_pnl        = sum(p["profit"] for p in positions_after.values())
+    risk_stats      = risk.get_stats(account_after["portfolio"])
+    sizer_stats     = sizer.get_stats()
 
-    print("\n" + "=" * 55)
-    print("📊 US SESSION DONE")
+    print("\n" + "=" * 60)
+    print("📊 SESSION DONE")
     print(f"💰 Balance:       ${account_after['balance']:,.2f}")
     print(f"📈 Open P/L:      ${open_pnl:,.2f}")
     print(f"📅 Today Trades:  ${daily_pnl:,.2f}")
+    print(f"🌍 Market regime: {regime_detector.get_emoji(market_regime)} {market_regime}")
     print(f"📉 Drawdown:      {risk_stats['drawdown']:.1f}%")
-    print(f"🔢 Trades today:  {risk_stats['trades_today']}")
-    print("=" * 55)
+    if sizer_stats:
+        print(f"🎯 Win rate:      {sizer_stats.get('win_rate', 0):.1f}%")
+    print("=" * 60)
 
     alert_daily_summary(
         balance=account_after["balance"],
         total_profit=open_pnl,
         holdings_count=len(positions_after),
         daily_pnl=daily_pnl,
-        market="🇺🇸 US Stocks"
+        market=f"🇺🇸 US ({market_regime})"
     )
 
 
