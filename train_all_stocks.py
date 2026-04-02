@@ -178,26 +178,45 @@ def train_on_all_stocks():
     print("=" * 55)
 
     os.makedirs("models", exist_ok=True)
-    train_env = TradingEnvironment(df_train, initial_balance=10000)
+
+    # Wrap environment with normalization — THIS fixes the NaN problem!
+    # VecNormalize keeps observations and rewards in a safe range
+    from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
+    from stable_baselines3.common.env_checker import check_env
+
+    print("🔍 Checking environment...")
+    base_env  = TradingEnvironment(df_train, initial_balance=10000)
+    vec_env   = DummyVecEnv([lambda: TradingEnvironment(df_train, initial_balance=10000)])
+    train_env = VecNormalize(
+        vec_env,
+        norm_obs=True,       # Normalize observations to mean=0, std=1
+        norm_reward=True,    # Normalize rewards — THIS stops the 3e+05 values!
+        clip_obs=10.0,       # Clip observations to [-10, 10]
+        clip_reward=10.0,    # Clip rewards to [-10, 10]
+    )
 
     model = PPO(
         "MlpPolicy",
         train_env,
-        learning_rate=0.0001,    # Slower learning = more stable
-        n_steps=4096,
-        batch_size=128,
-        n_epochs=15,
-        gamma=0.995,
-        ent_coef=0.005,
+        learning_rate=0.0003,     # Slightly higher — stable now with normalization
+        n_steps=2048,
+        batch_size=64,
+        n_epochs=10,
+        gamma=0.99,
+        ent_coef=0.01,
         clip_range=0.2,
+        max_grad_norm=0.5,        # Gradient clipping — prevents NaN in weights!
         verbose=1,
         tensorboard_log="./logs/"
     )
 
     model.learn(
-        total_timesteps=2_000_000,   # 2 million steps (was 200k before!)
+        total_timesteps=2_000_000,
         progress_bar=True
     )
+
+    # Save VecNormalize stats too — needed for live trading
+    train_env.save("models/vec_normalize.pkl")
 
     # Save model
     model.save("models/ai_trader_v3_all_stocks")
