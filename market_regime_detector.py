@@ -158,7 +158,7 @@ if __name__ == "__main__":
 
     tickers = ["AAPL", "SPY", "QQQ"]
     for ticker in tickers:
-        df = yf.download(ticker, period="100d", interval="1d",
+        df = yf.download(ticker, period="200d", interval="1d",
                         auto_adjust=True, progress=False)
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.get_level_values(0)
