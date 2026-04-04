@@ -5,17 +5,6 @@ import pandas_ta as ta
 from datetime import datetime, timedelta
 import time
 
-# ============================================
-# ALPACA US TRADER v3 — PHASE 3 FULL UPGRADE
-# Now uses:
-# ✅ Ensemble (3 models vote)
-# ✅ Position Sizer (smart sizing)
-# ✅ Market Regime Detection
-# ✅ Risk Manager
-# ✅ 15 stocks
-# ✅ Stop Loss + Take Profit
-# ============================================
-
 ALPACA_API_KEY    = "PK72YCIH6UAJXUH2RLYHZHYCYA"
 ALPACA_SECRET_KEY = "4mXCdKWwmCN8sHwBGnwrduyi3HW1bvE6ZBGBKhE5w9ve"
 ALPACA_BASE_URL   = "https://paper-api.alpaca.markets"
@@ -34,16 +23,25 @@ US_STOCKS = {
     "SHOP": "Shopify",  "COIN": "Coinbase",  "BABA":  "Alibaba",
 }
 
-# Load Phase 3 components
-from risk_manager        import RiskManager
-from position_sizer      import PositionSizer
-from market_regime_detector import MarketRegimeDetector
+# Load components safely
+try:
+    from risk_manager import RiskManager
+    risk = RiskManager(initial_balance=100000)
+except:
+    risk = None
 
-risk    = RiskManager(initial_balance=100000)
-sizer   = PositionSizer(base_pct=0.08, max_pct=0.18, min_pct=0.03)
-regime_detector = MarketRegimeDetector()
+try:
+    from position_sizer import PositionSizer
+    sizer = PositionSizer(base_pct=0.08, max_pct=0.18, min_pct=0.03)
+except:
+    sizer = None
 
-# Load ensemble (lazy — loads on first use)
+try:
+    from market_regime_detector import MarketRegimeDetector
+    regime_detector = MarketRegimeDetector()
+except:
+    regime_detector = None
+
 _ensemble = None
 def get_ensemble():
     global _ensemble
@@ -156,6 +154,32 @@ def get_positions():
     return {}
 
 
+def get_simple_signal(df):
+    """Fallback signal when ensemble not available."""
+    last   = df.iloc[-1]
+    second = df.iloc[-2]
+    buy_s  = 0
+    sell_s = 0
+
+    if last["RSI"] < 35:   buy_s  += 2
+    elif last["RSI"] > 65: sell_s += 2
+
+    if last["MACD"] > last["MACD_Signal"] and second["MACD"] <= second["MACD_Signal"]:
+        buy_s += 2
+    elif last["MACD"] < last["MACD_Signal"] and second["MACD"] >= second["MACD_Signal"]:
+        sell_s += 2
+
+    if last["Close"] > last["EMA_20"] > last["EMA_50"]:   buy_s  += 1
+    elif last["Close"] < last["EMA_20"] < last["EMA_50"]: sell_s += 1
+
+    if last["Close"] <= last["BB_Lower"]:   buy_s  += 1
+    elif last["Close"] >= last["BB_Upper"]: sell_s += 1
+
+    if buy_s  >= 3: return "BUY",  0.6
+    if sell_s >= 3: return "SELL", 0.6
+    return "HOLD", 0.0
+
+
 def run_us_trader():
     try:
         from telegram_alerts_v2 import alert_buy, alert_sell, alert_daily_summary, send_alert
@@ -165,7 +189,7 @@ def run_us_trader():
         def alert_daily_summary(*a, **k): pass
         def send_alert(*a, **k): pass
 
-    print("\n🇺🇸 US TRADER v3 — ENSEMBLE + REGIME + SMART SIZING")
+    print("\n🇺🇸 US TRADER v3")
     print("=" * 60)
     print(f"⏰ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
@@ -176,36 +200,35 @@ def run_us_trader():
 
     print(f"💰 Balance:   ${account['balance']:,.2f}")
     print(f"📦 Portfolio: ${account['portfolio']:,.2f}")
+    print(f"⚡ Buying Power: ${account['buying_power']:,.2f}")
 
     # Risk check
-    risk.update_peak(account["portfolio"])
-    can_trade, reason = risk.can_trade(account["portfolio"])
-    if not can_trade:
-        print(f"\n{reason}")
-        send_alert(reason, "error")
-        return
+    if risk:
+        risk.update_peak(account["portfolio"])
+        can_trade, reason = risk.can_trade(account["portfolio"])
+        if not can_trade:
+            print(f"\n{reason}")
+            send_alert(reason, "error")
+            return
 
-    # Get overall market regime from SPY
-    print("\n📊 Detecting market regime...")
-    spy_df = get_price_data("SPY")
-    market_regime = "SIDEWAYS"
-    if spy_df is not None:
-        market_regime, m_conf, m_desc = regime_detector.detect(spy_df)
-        emoji = regime_detector.get_emoji(market_regime)
-        print(f"  {emoji} Market: {market_regime} ({m_conf:.0%}) — {m_desc}")
+    # Market regime (informational only — does NOT block trades)
+    market_regime  = "UNKNOWN"
+    trade_mult     = 1.0
+    if regime_detector:
+        spy_df = get_price_data("SPY")
+        if spy_df is not None:
+            market_regime, m_conf, m_desc = regime_detector.detect(spy_df)
+            emoji = regime_detector.get_emoji(market_regime)
+            print(f"\n📊 Market: {emoji} {market_regime} — {m_desc}")
+            # Reduce size in bear but NEVER block completely
+            trade_mult = max(0.5, regime_detector.get_trade_multiplier(market_regime))
 
-        if market_regime == "STRONG_BEAR":
-            msg = f"🛑 STRONG BEAR market detected!\nReducing all positions."
-            print(f"\n{msg}")
-            send_alert(msg, "error")
-
-    trade_mult = regime_detector.get_trade_multiplier(market_regime)
-    print(f"  💰 Trade size multiplier: {trade_mult:.1f}x")
     print("=" * 60)
 
     ensemble  = get_ensemble()
     positions = get_positions()
     daily_pnl = 0
+    invest_base = account["buying_power"] * 0.08  # 8% per trade base
 
     for symbol, name in US_STOCKS.items():
         print(f"\n📥 {name} ({symbol})...")
@@ -216,92 +239,68 @@ def run_us_trader():
 
         price = float(df["Close"].iloc[-1])
 
-        # Detect individual stock regime
-        stock_regime, s_conf, s_desc = regime_detector.detect(df)
-        s_emoji = regime_detector.get_emoji(stock_regime)
-
-        # Stop Loss & Take Profit
+        # Stop Loss check
         if symbol in positions:
             pos = positions[symbol]
-            if risk.should_stop_loss(pos["buy_price"], price):
-                print(f"  🛑 STOP LOSS! Loss: {pos['profit_pct']:.1f}%")
+            loss_pct = pos["profit_pct"]
+
+            if risk and risk.should_stop_loss(pos["buy_price"], price):
+                print(f"  🛑 STOP LOSS! Loss: {loss_pct:.1f}%")
                 order = place_order(symbol, int(pos["shares"]), "sell")
                 if order:
-                    risk.record_trade()
-                    sizer.record_trade(pos["profit_pct"] / 100)
+                    if risk: risk.record_trade()
+                    if sizer: sizer.record_trade(loss_pct / 100)
                     alert_sell(name, int(pos["shares"]), price, pos["profit"], "US")
                     daily_pnl += pos["profit"]
                 continue
 
-            if risk.should_take_profit(pos["buy_price"], price):
-                print(f"  💰 TAKE PROFIT! Gain: {pos['profit_pct']:.1f}%")
+            # Take Profit check
+            if risk and risk.should_take_profit(pos["buy_price"], price):
+                print(f"  💰 TAKE PROFIT! Gain: {loss_pct:.1f}%")
                 order = place_order(symbol, int(pos["shares"]), "sell")
                 if order:
-                    risk.record_trade()
-                    sizer.record_trade(pos["profit_pct"] / 100)
+                    if risk: risk.record_trade()
+                    if sizer: sizer.record_trade(loss_pct / 100)
                     alert_sell(name, int(pos["shares"]), price, pos["profit"], "US")
                     daily_pnl += pos["profit"]
                 continue
 
-            # Bear regime → sell holdings
-            if regime_detector.should_sell_holdings(market_regime) and not regime_detector.should_buy(stock_regime):
-                print(f"  📉 Selling due to bear regime")
-                order = place_order(symbol, int(positions[symbol]["shares"]), "sell")
-                if order:
-                    risk.record_trade()
-                    alert_sell(name, int(positions[symbol]["shares"]), price,
-                               positions[symbol]["profit"], "US")
-                    daily_pnl += positions[symbol]["profit"]
-                continue
-
-        # Get ensemble vote
+        # Get signal — ensemble first, fallback to simple
         if ensemble:
             signal, conf, breakdown = ensemble.vote(df, account["balance"], symbol)
             ensemble.print_breakdown(symbol, price, breakdown)
-            signal_strength = breakdown["buy_votes"] if signal == "BUY" else breakdown["sell_votes"]
         else:
-            # Fallback signal
-            last = df.iloc[-1]
-            if last["RSI"] < 35 and last["MACD"] > last["MACD_Signal"]:
-                signal, conf, signal_strength = "BUY", 0.6, 2
-            elif last["RSI"] > 65 and last["MACD"] < last["MACD_Signal"]:
-                signal, conf, signal_strength = "SELL", 0.6, 2
-            else:
-                signal, conf, signal_strength = "HOLD", 0.0, 0
+            signal, conf = get_simple_signal(df)
+            print(f"  📊 Signal: {signal} ({conf:.0%})")
 
-        print(f"  {s_emoji} Stock regime: {stock_regime} | Signal: {signal} ({conf:.0%})")
+        # Calculate invest amount
+        invest_amt = invest_base * trade_mult
+        if sizer:
+            atr_pct = float(df["ATR"].iloc[-1]) / price if price > 0 else 0.02
+            invest_amt, invest_pct, reason = sizer.calculate(
+                balance=account["buying_power"],
+                confidence=conf,
+                volatility_pct=atr_pct,
+                signal_strength=2
+            )
+            invest_amt *= trade_mult
 
-        # Skip buying in bad regimes
-        if signal == "BUY" and not regime_detector.should_buy(stock_regime):
-            print(f"  ⏭️ Skipping BUY — bad regime ({stock_regime})")
-            continue
-
-        # Calculate position size
-        atr_pct = float(df["ATR"].iloc[-1]) / price if price > 0 else 0.02
-        invest_amt, invest_pct, size_reason = sizer.calculate(
-            balance=account["buying_power"],
-            confidence=conf,
-            volatility_pct=atr_pct,
-            signal_strength=signal_strength
-        )
-        # Apply regime multiplier
-        invest_amt *= trade_mult
-
+        # Execute — NO regime blocking!
         if signal == "BUY" and symbol not in positions:
             shares = int(invest_amt // price)
             if shares > 0:
-                print(f"  💰 Size: ${invest_amt:,.0f} ({invest_pct}%) — {size_reason}")
+                print(f"  💰 Investing ${invest_amt:,.0f}")
                 order = place_order(symbol, shares, "buy")
                 if order:
-                    risk.record_trade()
+                    if risk: risk.record_trade()
                     alert_buy(name, shares, price, "US")
 
         elif signal == "SELL" and symbol in positions:
             pos   = positions[symbol]
             order = place_order(symbol, int(pos["shares"]), "sell")
             if order:
-                risk.record_trade()
-                sizer.record_trade(pos["profit_pct"] / 100)
+                if risk: risk.record_trade()
+                if sizer: sizer.record_trade(pos["profit_pct"] / 100)
                 alert_sell(name, int(pos["shares"]), price, pos["profit"], "US")
                 daily_pnl += pos["profit"]
 
@@ -314,18 +313,14 @@ def run_us_trader():
     account_after   = get_account()
     positions_after = get_positions()
     open_pnl        = sum(p["profit"] for p in positions_after.values())
-    risk_stats      = risk.get_stats(account_after["portfolio"])
-    sizer_stats     = sizer.get_stats()
 
     print("\n" + "=" * 60)
     print("📊 SESSION DONE")
-    print(f"💰 Balance:       ${account_after['balance']:,.2f}")
-    print(f"📈 Open P/L:      ${open_pnl:,.2f}")
-    print(f"📅 Today Trades:  ${daily_pnl:,.2f}")
-    print(f"🌍 Market regime: {regime_detector.get_emoji(market_regime)} {market_regime}")
-    print(f"📉 Drawdown:      {risk_stats['drawdown']:.1f}%")
-    if sizer_stats:
-        print(f"🎯 Win rate:      {sizer_stats.get('win_rate', 0):.1f}%")
+    print(f"💰 Balance:      ${account_after['balance']:,.2f}")
+    print(f"📈 Open P/L:     ${open_pnl:,.2f}")
+    print(f"📅 Today Trades: ${daily_pnl:,.2f}")
+    print(f"🌍 Market:       {market_regime}")
+    print(f"📦 Positions:    {len(positions_after)}")
     print("=" * 60)
 
     alert_daily_summary(
