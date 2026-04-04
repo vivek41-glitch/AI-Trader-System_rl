@@ -16,8 +16,8 @@ import time
 # ✅ Stop Loss + Take Profit
 # ============================================
 
-ALPACA_API_KEY    = "YOUR_ALPACA_API_KEY"
-ALPACA_SECRET_KEY = "YOUR_ALPACA_SECRET_KEY"
+ALPACA_API_KEY    = "PK72YCIH6UAJXUH2RLYHZHYCYA"
+ALPACA_SECRET_KEY = "4mXCdKWwmCN8sHwBGnwrduyi3HW1bvE6ZBGBKhE5w9ve"
 ALPACA_BASE_URL   = "https://paper-api.alpaca.markets"
 
 HEADERS = {
