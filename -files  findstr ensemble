@@ -1,0 +1,17 @@
+[33m0a9f1dd[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m, [m[1;31morigin/main[m[33m)[m Phase 3 fully working - ensemble, regime, position sizer
+[33mff77b68[m Phase 3 complete
+[33m199c620[m Phase 3 - Ensemble + Regime + Smart Sizing
+[33m489b8b5[m Phase 2 complete - trained on 50 stocks, crypto, commodities, news
+[33m81de39b[m Phase 2 complete - trained on 50 stocks, crypto, commodities, news
+[33m6fe3079[m Phase 2 - Crypto + Gold + Silver + News
+[33mc95abbd[m Phase 1 upgrades - risk manager + take profit
+[33m3b1c478[m Smart runner - full  optimized
+[33me3d9278[m Fix: ultra lightweight for Railway
+[33m30cbbed[m Fix: remove heavy libraries for Railway
+[33m2d12178[m Add Railway deployment
+[33mdc1f280[m updated code
+[33m2e7a36d[m more smarter
+[33m2fb24d2[m your message
+[33mac93bfe[m Fixed performance tracker, LSTM system complete
+[33me366f07[m update
+[33m5799bd9[m AI Trader System - Initial commit

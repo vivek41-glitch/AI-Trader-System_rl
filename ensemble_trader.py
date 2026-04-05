@@ -169,7 +169,7 @@ class EnsembleTrader:
             votes["PPO"] = (ppo_signal, ppo_conf)
 
         total_models = len(votes)
-        needed       = 2   # Always need at least 2 to agree
+        needed       = 1   # Always need at least 1 to agree
 
         buy_votes  = sum(1 for s, c in votes.values() if s == "BUY")
         sell_votes = sum(1 for s, c in votes.values() if s == "SELL")
